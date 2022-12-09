@@ -1,7 +1,10 @@
+extern crate core;
+
 mod archiver;
 mod processor;
 
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use clap::Parser;
 use log::LevelFilter;
@@ -62,6 +65,7 @@ fn main() {
         std::process::exit(TARGET_NOT_DIR);
     }
 
+    let start = SystemTime::now();
     let entries = match processor::process_directory(
         &target_path,
         args.iteration_retries,
@@ -87,4 +91,8 @@ fn main() {
             std::process::exit(1);
         }
     }
+    log::info!(
+        "Finished everything successfully in {} ms.",
+        start.elapsed().unwrap().as_millis()
+    );
 }

@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufWriter, Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use tar::{Builder, Header};
+use tar::{Builder, Header, HeaderMode};
 
 use crate::processor::{Entry, EntryType};
 
@@ -11,10 +11,13 @@ pub fn create_tarball<P: AsRef<Path>>(
     entries: Vec<Entry>,
     tarball_path: P,
 ) -> std::io::Result<()> {
+    log::info!("Creating tarbell with {} entries", entries.len());
+
     let tarball_file = File::create(tarball_path)?;
     let tarball_writer = BufWriter::new(tarball_file);
 
     let mut builder = Builder::new(tarball_writer);
+    builder.mode(HeaderMode::Complete);
 
     let origin_buf = origin.as_ref().to_path_buf();
 
@@ -23,11 +26,16 @@ pub fn create_tarball<P: AsRef<Path>>(
 
         match entry.entry_type {
             EntryType::File(data) => {
-                let mut header = Header::new_gnu();
-                header.set_path(relative_path)?;
+                let mut header = Header::new_old();
                 header.set_metadata(&entry.metadata);
+                log::debug!(
+                    "New entry {} with size {}",
+                    relative_path.display(),
+                    data.len()
+                );
+                header.set_size(data.len() as u64);
                 header.set_cksum();
-                builder.append(&header, Cursor::new(data))?;
+                builder.append_data(&mut header, &relative_path, Cursor::new(data))?;
             }
             EntryType::Symlink => match entry.path.read_link() {
                 Ok(link) => {
@@ -38,9 +46,16 @@ pub fn create_tarball<P: AsRef<Path>>(
                         );
                         continue;
                     }
-                    let mut header = Header::new_gnu();
+                    let mut header = Header::new_old();
+                    header.set_metadata(&entry.metadata);
                     header.set_entry_type(tar::EntryType::Symlink);
                     header.set_size(0);
+                    header.set_cksum();
+                    log::debug!(
+                        "New symlink {} -> {}",
+                        relative_path.display(),
+                        link.display()
+                    );
                     builder.append_link(
                         &mut header,
                         relative_path,
@@ -52,6 +67,10 @@ pub fn create_tarball<P: AsRef<Path>>(
                     continue;
                 }
             },
+            EntryType::Directory => {
+                log::debug!("New directory {}", relative_path.display());
+                builder.append_dir(&relative_path, &relative_path)?;
+            }
         }
     }
 

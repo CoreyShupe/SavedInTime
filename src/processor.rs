@@ -13,6 +13,7 @@ pub struct Entry {
 pub enum EntryType {
     File(Vec<u8>),
     Symlink,
+    Directory,
 }
 
 #[derive(Debug)]
@@ -45,10 +46,12 @@ pub fn process_directory<P: AsRef<Path>>(
     if !path.is_dir() {
         return Err(ProcessError::PathNotDir);
     }
+    log::debug!("Processing directory {}", path.display());
     let mut iterations = 0;
-    let mut visitor = Visitor::create(path, SystemTime::now())
-        .map_err(|_| ProcessError::MetadataFetchFailed)?;
     let mut last_time = SystemTime::now();
+    let mut visitor =
+        Visitor::create(path, last_time).map_err(|_| ProcessError::MetadataFetchFailed)?;
+    log::debug!("Initial visit: {:#?}", last_time);
     while match visitor.visit(last_time, compression_level) {
         Ok(_) => false,
         Err(recoverable) => {
@@ -62,12 +65,16 @@ pub fn process_directory<P: AsRef<Path>>(
             }
         }
     } {
+        log::debug!("Iteration {}", iterations);
         iterations += 1;
+        log::debug!("Pushing...");
         last_time = SystemTime::now();
     }
 
     let mut compiled_entries = Vec::new();
+    log::debug!("Compiling with {:#?}", last_time);
     visitor.compile(last_time, &mut compiled_entries);
+    log::debug!("Compiled {} entries", compiled_entries.len());
     Ok(compiled_entries)
 }
 
@@ -87,6 +94,16 @@ impl From<SymlinkEntry> for Entry {
             path: value.path,
             metadata: value.metadata,
             entry_type: EntryType::Symlink,
+        }
+    }
+}
+
+impl From<&Visitor> for Entry {
+    fn from(value: &Visitor) -> Self {
+        Self {
+            path: value.origin.to_path_buf(),
+            metadata: value.metadata.clone(),
+            entry_type: EntryType::Directory,
         }
     }
 }
@@ -212,10 +229,7 @@ struct Visitor {
 }
 
 impl Visitor {
-    pub fn create<P: AsRef<Path>>(
-        path: P,
-        revision: SystemTime,
-    ) -> Result<Self, bool> {
+    pub fn create<P: AsRef<Path>>(path: P, revision: SystemTime) -> Result<Self, bool> {
         let path_buf = path.as_ref().to_path_buf();
         let metadata = match path.as_ref().metadata() {
             Ok(metadata) => metadata,
@@ -330,12 +344,25 @@ impl Visitor {
 
     pub fn compile(self, time_to_match: SystemTime, compiled_entries: &mut Vec<Entry>) {
         if self.revision != time_to_match {
+            log::debug!(
+                "Skipping compilation of {} because it was modified after the visit revision; {:?} != {:?}",
+                self.origin.display(),
+                self.revision,
+                time_to_match
+            );
             return;
         }
+
+        compiled_entries.push(Entry::from(&self));
 
         for (_, entry) in self.entries {
             if entry.visit_revision == time_to_match {
                 compiled_entries.push(Entry::from(entry));
+            } else {
+                log::debug!(
+                    "Skipping compilation of {} because it was modified after the visit revision.",
+                    entry.path.display()
+                );
             }
         }
         for (_, visitor) in self.sub_visitors {
@@ -344,6 +371,11 @@ impl Visitor {
         for (_, link) in self.links {
             if link.visit_revision == time_to_match {
                 compiled_entries.push(Entry::from(link));
+            } else {
+                log::debug!(
+                    "Skipping compilation of {} because it was modified after the visit revision.",
+                    link.path.display()
+                );
             }
         }
     }
