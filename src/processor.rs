@@ -46,8 +46,8 @@ pub fn process_directory<P: AsRef<Path>>(
         return Err(ProcessError::PathNotDir);
     }
     let mut iterations = 0;
-    let mut visitor = Visitor::create(path, SystemTime::now(), compression_level)
-        .map_err(|err| ProcessError::MetadataFetchFailed)?;
+    let mut visitor = Visitor::create(path, SystemTime::now())
+        .map_err(|_| ProcessError::MetadataFetchFailed)?;
     let mut last_time = SystemTime::now();
     while match visitor.visit(last_time, compression_level) {
         Ok(_) => false,
@@ -215,7 +215,6 @@ impl Visitor {
     pub fn create<P: AsRef<Path>>(
         path: P,
         revision: SystemTime,
-        compression_level: i32,
     ) -> Result<Self, bool> {
         let path_buf = path.as_ref().to_path_buf();
         let metadata = match path.as_ref().metadata() {
@@ -298,7 +297,7 @@ impl Visitor {
                         .unwrap()
                         .visit(visit_revision, compression_level)?;
                 } else {
-                    let visitor = Visitor::create(&path, visit_revision, compression_level)?;
+                    let visitor = Visitor::create(&path, visit_revision)?;
                     self.sub_visitors.insert(path.clone(), visitor);
                     self.sub_visitors // we want to ensure we can cache what's possible
                         .get_mut(&path)

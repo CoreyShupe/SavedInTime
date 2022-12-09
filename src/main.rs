@@ -3,7 +3,6 @@ mod processor;
 
 use std::path::PathBuf;
 
-use crate::processor::{Entry, ProcessError};
 use clap::Parser;
 use log::LevelFilter;
 

@@ -76,5 +76,5 @@ fn find_relative_path<P1: AsRef<Path>, P2: AsRef<Path>>(origin: P1, relative: P2
             .expect("Something went wrong; could not strip prefix."),
     );
 
-    relative_path.to_path_buf()
+    relative_path
 }
