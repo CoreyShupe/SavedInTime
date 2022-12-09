@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{File, Metadata};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tempfile::tempfile;
@@ -137,10 +138,10 @@ impl WeakEntry {
             }
         }
         let mut self_ref = Self {
-            path: path_buf,
+            path: path_buf.clone(),
             metadata,
             visit_revision,
-            encoded_data: tempfile().map_err(|_| false)?,
+            encoded_data: tempfile().map_err(|_| !path_buf.exists())?,
         };
         self_ref.fvisit(compression_level)?;
         Ok(self_ref)
@@ -177,11 +178,19 @@ impl WeakEntry {
     }
 
     fn fvisit(&mut self, compression_level: i32) -> Result<(), bool> {
-        self.encoded_data = tempfile().map_err(|_| false)?;
-        if let Err(err) = zstd::encode_all(&self.encoded_data, compression_level) {
-            log::error!("Failed to encode data for {}: {}", self.path.display(), err);
-            return Err(true);
-        };
+        self.encoded_data = tempfile().map_err(|_| !self.path.exists())?;
+        let mut encoder =
+            zstd::Encoder::new(&mut self.encoded_data, compression_level).map_err(|err| {
+                log::error!("Failed to encode data for {}: {}", self.path.display(), err);
+                !self.path.exists()
+            })?;
+        encoder
+            .write_all(&std::fs::read(&self.path).map_err(|_| false)?)
+            .map_err(|err| {
+                log::error!("Failed to encode data for {}: {}", self.path.display(), err);
+                !self.path.exists()
+            })?;
+        encoder.finish().map_err(|_| !self.path.exists())?;
         Ok(())
     }
 }
@@ -291,7 +300,7 @@ impl Visitor {
                     self.origin.display(),
                     err
                 );
-                return Err(false);
+                return Err(!self.origin.exists());
             }
         } {
             let entry = match entry {
