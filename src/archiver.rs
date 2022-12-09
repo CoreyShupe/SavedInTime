@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufWriter, Cursor, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use tar::{Builder, Header, HeaderMode};
@@ -28,14 +28,11 @@ pub fn create_tarball<P: AsRef<Path>>(
             EntryType::File(data) => {
                 let mut header = Header::new_old();
                 header.set_metadata(&entry.metadata);
-                log::debug!(
-                    "New entry {} with size {}",
-                    relative_path.display(),
-                    data.len()
-                );
-                header.set_size(data.len() as u64);
+                let size = data.metadata()?.len();
+                log::debug!("New entry {} with size {}", relative_path.display(), size);
+                header.set_size(size);
                 header.set_cksum();
-                builder.append_data(&mut header, &relative_path, Cursor::new(data))?;
+                builder.append_data(&mut header, &relative_path, data)?;
             }
             EntryType::Symlink => match entry.path.read_link() {
                 Ok(link) => {

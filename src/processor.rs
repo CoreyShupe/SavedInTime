@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs::{File, Metadata};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use tempfile::tempfile;
 
 pub struct Entry {
     pub path: PathBuf,
@@ -11,7 +12,7 @@ pub struct Entry {
 }
 
 pub enum EntryType {
-    File(Vec<u8>),
+    File(File),
     Symlink,
     Directory,
 }
@@ -112,7 +113,7 @@ struct WeakEntry {
     path: PathBuf,
     metadata: Metadata,
     visit_revision: SystemTime,
-    encoded_data: Vec<u8>,
+    encoded_data: File,
 }
 
 impl WeakEntry {
@@ -139,7 +140,7 @@ impl WeakEntry {
             path: path_buf,
             metadata,
             visit_revision,
-            encoded_data: vec![],
+            encoded_data: tempfile().map_err(|_| false)?,
         };
         self_ref.fvisit(compression_level)?;
         Ok(self_ref)
@@ -176,14 +177,11 @@ impl WeakEntry {
     }
 
     fn fvisit(&mut self, compression_level: i32) -> Result<(), bool> {
-        self.encoded_data =
-            match zstd::encode_all(File::open(&self.path).unwrap(), compression_level) {
-                Ok(data) => data,
-                Err(err) => {
-                    log::error!("Failed to encode data for {}: {}", self.path.display(), err);
-                    return Err(true);
-                }
-            };
+        self.encoded_data = tempfile().map_err(|_| false)?;
+        if let Err(err) = zstd::encode_all(&self.encoded_data, compression_level) {
+            log::error!("Failed to encode data for {}: {}", self.path.display(), err);
+            return Err(true);
+        };
         Ok(())
     }
 }
