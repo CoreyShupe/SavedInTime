@@ -3,6 +3,7 @@ mod processor;
 
 use std::path::PathBuf;
 
+use crate::processor::{Entry, ProcessError};
 use clap::Parser;
 use log::LevelFilter;
 
@@ -20,10 +21,15 @@ struct SitArgs {
     /// The directory to capture in the snapshot.
     #[arg(short, long, name = "target")]
     target_directory: String,
-    /// Output file for the processed directory.
-    /// The file is contained in a tar.gz format.
-    #[arg(short, long, default_value = "output.tar.gz", name = "output")]
+    /// Output file for the processed directory. The file is contained in a tar.zst format.
+    #[arg(short, long, default_value = "output.tar.zst", name = "output")]
     output_file: String,
+    /// Amount of iterations the visitor will run before giving up on getting a valid snapshot.
+    #[arg(short, long, default_value = "5", name = "iteration_retries")]
+    iteration_retries: i32,
+    /// The compression level to use for the output file.
+    #[arg(short, long, default_value = "3", name = "compression_level")]
+    compression_level: i32,
 }
 
 fn main() {
@@ -56,5 +62,30 @@ fn main() {
         );
         std::process::exit(TARGET_NOT_DIR);
     }
-    processor::process_directory(target_path);
+
+    let entries = match processor::process_directory(
+        &target_path,
+        args.iteration_retries,
+        args.compression_level,
+    ) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log::error!("Failed to process directory: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    match archiver::create_tarball(&target_path, entries, &PathBuf::from(&args.output_file)) {
+        Ok(_) => log::info!(
+            "Successfully created tarball at {}",
+            PathBuf::from(&args.output_file)
+                .canonicalize()
+                .unwrap()
+                .display()
+        ),
+        Err(err) => {
+            log::error!("Failed to create tarball: {}", err);
+            std::process::exit(1);
+        }
+    }
 }
